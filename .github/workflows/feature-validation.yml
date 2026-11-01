@@ -1,0 +1,49 @@
+name: Feature-layer validation
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "source-lock/**"
+    paths:
+      - "docs/**"
+      - "patches/**"
+      - "config/**"
+      - "scripts/**"
+      - ".github/workflows/feature-validation.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "patches/**"
+      - "config/**"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  layer-contract:
+    name: ${{ matrix.layer }} contract
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        layer: [source-lock, perf-thermal, root-network, usb-wifi, droidspaces-packaging]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify repository contract
+        run: |
+          set -euxo pipefail
+          test -f README.md
+          test -f target-lock/CP3A.261005.005/README.md
+          if [ -f scripts/validate-target-lock.sh ]; then bash scripts/validate-target-lock.sh; fi
+      - name: Record layer provenance
+        run: |
+          mkdir -p provenance
+          printf 'layer=%s\nref=%s\nsha=%s\n' "${{ matrix.layer }}" "$GITHUB_REF" "$GITHUB_SHA" > provenance/layer.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layer-contract-${{ matrix.layer }}-${{ github.run_id }}
+          path: provenance/layer.txt
+          retention-days: 7

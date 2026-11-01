@@ -1,0 +1,61 @@
+name: Android 14-6.1 GKI compile smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gki-smoke.yml"
+      - "scripts/**"
+      - "target-lock/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gki-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: GKI aarch64 compile smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      GKI_BRANCH: android14-6.1
+      DIST_DIR: ${{ github.workspace }}/out/dist
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner and provenance
+        run: |
+          set -euxo pipefail
+          uname -a
+          df -h
+          git --version
+          mkdir -p provenance
+          printf 'repository=%s\nsha=%s\nrun_id=%s\n' "${GITHUB_REPOSITORY}" "${GITHUB_SHA}" "${GITHUB_RUN_ID}" > provenance/build-metadata.txt
+      - name: Fetch Android Common Kernel source
+        run: |
+          set -euxo pipefail
+          git clone --depth=1 --branch "${GKI_BRANCH}" https://android.googlesource.com/kernel/common.git common
+          cd common
+          git rev-parse HEAD | tee ../provenance/kernel-common-revision.txt
+      - name: Build GKI aarch64 distribution
+        working-directory: common
+        run: |
+          set -euxo pipefail
+          tools/bazel run //common:kernel_aarch64_dist -- --destdir="${DIST_DIR}"
+      - name: Inspect artifacts
+        run: |
+          set -euxo pipefail
+          test -d "${DIST_DIR}"
+          find "${DIST_DIR}" -maxdepth 2 -type f -printf '%P\n' | sort | tee provenance/dist-files.txt
+          sha256sum "${DIST_DIR}"/* 2>/dev/null | tee provenance/dist-sha256.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gki-smoke-${{ github.run_id }}
+          path: |
+            provenance/
+            out/dist/
+          if-no-files-found: warn
+          retention-days: 7

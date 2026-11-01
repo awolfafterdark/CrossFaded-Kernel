@@ -1,0 +1,42 @@
+name: Shusky source-lock discovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [source-lock/cp3a]
+    paths:
+      - ".github/workflows/shusky-source-lock.yml"
+      - "docs/CP3A_SOURCE_LOCK_ACTIONS.md"
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Google repo tool
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/bin"
+          curl --fail --location https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod a+rx "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Sync official shusky production source topology
+        run: |
+          set -euxo pipefail
+          mkdir shusky && cd shusky
+          repo init -u https://android.googlesource.com/kernel/manifest -b android-gs-shusky-6.1-android16
+          repo sync -c --no-tags -j2
+          mkdir -p "$GITHUB_WORKSPACE/provenance"
+          repo manifest -r -o "$GITHUB_WORKSPACE/provenance/shusky-manifest.xml"
+          find . -maxdepth 2 -type f -name 'build_*shusky*.sh' -o -name 'build_shusky.sh' | sort | tee "$GITHUB_WORKSPACE/provenance/build-entrypoints.txt"
+          git -C aosp rev-parse HEAD | tee "$GITHUB_WORKSPACE/provenance/aosp-revision.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shusky-source-lock-${{ github.run_id }}
+          path: provenance/
+          retention-days: 14

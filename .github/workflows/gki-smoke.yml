@@ -1,4 +1,4 @@
-name: Android 14-6.1 GKI compile smoke
+name: Android 17 Pixel 8 — 6.1 GKI compile smoke
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   compile:
-    name: GKI aarch64 compile smoke
+    name: Android 17 target / android14-6.1 GKI smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
@@ -31,7 +31,7 @@ jobs:
           uname -a
           df -h
           mkdir -p provenance
-          printf 'repository=%s\nsha=%s\nrun_id=%s\n' "${GITHUB_REPOSITORY}" "${GITHUB_SHA}" "${GITHUB_RUN_ID}" > provenance/build-metadata.txt
+          printf 'repository=%s\nsha=%s\nrun_id=%s\nandroid_target=17\ngki_lineage=android14-6.1\n' "${GITHUB_REPOSITORY}" "${GITHUB_SHA}" "${GITHUB_RUN_ID}" > provenance/build-metadata.txt
       - name: Install Google repo tool
         run: |
           set -euxo pipefail
@@ -39,7 +39,7 @@ jobs:
           curl --fail --location https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
           chmod a+rx "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
-      - name: Sync hermetic Android Common Kernel source
+      - name: Sync hermetic Android 14-6.1 GKI lineage
         run: |
           set -euxo pipefail
           mkdir ack
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gki-smoke-${{ github.run_id }}
+          name: android17-pixel8-6.1-gki-smoke-${{ github.run_id }}
           path: |
             provenance/
             out/dist/

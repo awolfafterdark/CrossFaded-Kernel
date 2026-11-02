@@ -14,7 +14,7 @@ permissions:
 jobs:
   resolve:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - name: Install Google repo tool
@@ -25,18 +25,32 @@ jobs:
           chmod a+rx "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - name: Sync official shusky production source topology
+        shell: bash
         run: |
-          set -euxo pipefail
-          mkdir shusky && cd shusky
-          repo init -u https://android.googlesource.com/kernel/manifest -b android-gs-shusky-6.1-android16
-          repo sync -c --no-tags -j2
-          mkdir -p "$GITHUB_WORKSPACE/provenance"
-          repo manifest -r -o "$GITHUB_WORKSPACE/provenance/shusky-manifest.xml"
-          find . -maxdepth 2 -type f -name 'build_*shusky*.sh' -o -name 'build_shusky.sh' | sort | tee "$GITHUB_WORKSPACE/provenance/build-entrypoints.txt"
-          git -C aosp rev-parse HEAD | tee "$GITHUB_WORKSPACE/provenance/aosp-revision.txt"
+          set -uo pipefail
+          mkdir -p provenance shusky
+          df -h | tee provenance/disk-before.txt
+          cd shusky
+          repo init -u https://android.googlesource.com/kernel/manifest -b android-gs-shusky-6.1-android16 2>&1 | tee "$GITHUB_WORKSPACE/provenance/repo-init.log"
+          init_status=${PIPESTATUS[0]}
+          if [ "$init_status" -ne 0 ]; then
+            echo "$init_status" > "$GITHUB_WORKSPACE/provenance/repo-init.exit"
+            exit "$init_status"
+          fi
+          repo sync -c --no-tags -j2 2>&1 | tee "$GITHUB_WORKSPACE/provenance/repo-sync.log"
+          sync_status=${PIPESTATUS[0]}
+          repo status 2>&1 | tee "$GITHUB_WORKSPACE/provenance/repo-status.log" || true
+          repo manifest -r -o "$GITHUB_WORKSPACE/provenance/shusky-manifest.xml" || true
+          find . -maxdepth 3 -type f \( -name 'build_*shusky*.sh' -o -name 'build_shusky.sh' \) -print | sort | tee "$GITHUB_WORKSPACE/provenance/build-entrypoints.txt" || true
+          find . -maxdepth 2 -mindepth 1 -type d -printf '%P\n' | sort | tee "$GITHUB_WORKSPACE/provenance/top-level-dirs.txt" || true
+          if [ -d aosp/.git ]; then git -C aosp rev-parse HEAD | tee "$GITHUB_WORKSPACE/provenance/aosp-revision.txt"; fi
+          df -h | tee "$GITHUB_WORKSPACE/provenance/disk-after.txt"
+          echo "$sync_status" > "$GITHUB_WORKSPACE/provenance/repo-sync.exit"
+          exit "$sync_status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: shusky-source-lock-${{ github.run_id }}
           path: provenance/
+          if-no-files-found: warn
           retention-days: 14

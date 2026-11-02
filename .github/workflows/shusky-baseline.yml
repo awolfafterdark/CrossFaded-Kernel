@@ -1,0 +1,67 @@
+name: Shusky source-built baseline
+on:
+  workflow_dispatch:
+  push:
+    branches: [source-lock/cp3a]
+    paths: [".github/workflows/shusky-baseline.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: shusky-baseline-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare tools and inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p provenance "$HOME/bin" shusky
+          df -h > provenance/disk-before.txt
+          free -h > provenance/memory.txt
+          curl --fail --location --retry 2 https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          sha256sum "$HOME/bin/repo" > provenance/repo-tool.sha256
+      - name: Sync official manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd shusky
+          repo init -u https://android.googlesource.com/kernel/manifest -b android-gs-shusky-6.1-android16 --depth=1 2>&1 | tee ../provenance/init.log
+          timeout --signal=TERM --kill-after=60s 65m repo sync -c --no-tags -j2 2>&1 | tee ../provenance/sync.log
+          repo manifest -r -o ../provenance/resolved-manifest.xml
+          git -C .repo/manifests rev-parse HEAD > ../provenance/manifest-commit.txt
+          git -C aosp rev-parse HEAD > ../provenance/aosp-commit.txt
+          cp private/devices/google/shusky/build_shusky.sh ../provenance/
+          df -h > ../provenance/disk-after-sync.txt
+      - name: Build official shusky distribution from source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd shusky
+          test -f build_shusky.sh
+          timeout --signal=TERM --kill-after=120s 150m bash build_shusky.sh --kernel_package=@//aosp --jobs=2 2>&1 | tee ../provenance/build.log
+      - name: Record artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d shusky/out/shusky/dist
+          find shusky/out/shusky/dist -maxdepth 1 -type f -exec sha256sum {} + > provenance/SHA256SUMS
+          printf '%s\n' 'Engineering baseline only. Exact CP3A source equivalence and device boot compatibility are NOT verified. No flashing package is produced.' > provenance/COMPATIBILITY.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shusky-baseline-evidence-${{ github.run_id }}
+          path: provenance/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: shusky-baseline-dist-${{ github.run_id }}
+          path: shusky/out/shusky/dist/
+          if-no-files-found: error
+          retention-days: 7
